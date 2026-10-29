@@ -1,0 +1,21 @@
+# .github/workflows/guardrails-step.yml
+# Single-step Cloud Guardrails powered by Open Cloud Agents Composite Action
+name: Security & Guardrails Step
+
+on: [push, pull_request]
+
+jobs:
+  guardrails:
+    name: Run Open Cloud Agents Guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Cloud Guardrails
+        uses: open-cloud-agents/pipelines@v1
+        with:
+          enable-secret-scan: true
+          enable-iac-audit: true
+          enable-ai-safety: true
+          enable-shell-lint: true

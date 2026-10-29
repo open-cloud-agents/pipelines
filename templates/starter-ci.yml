@@ -11,7 +11,7 @@ on:
 jobs:
   cloud-guardrails:
     name: Cloud Architecture & Security Audit
-    uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@main
+    uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v1
     with:
       enable-secret-scan: true
       enable-iac-audit: true
