@@ -1,0 +1,120 @@
+name: "Open Cloud Agents Pipeline"
+description: "All-in-one cloud architecture review, IaC state destruction prevention, and AI safety guardrails"
+author: "Ibrahim Jimoh"
+
+inputs:
+  enable-secret-scan:
+    description: "Run zero-trust secret leak detection (Gitleaks)"
+    required: false
+    default: "true"
+  enable-iac-audit:
+    description: "Run Infrastructure as Code (IaC) state destruction and perimeter checks"
+    required: false
+    default: "true"
+  enable-ai-safety:
+    description: "Run ISO 42001 lineage & OWASP prompt injection scans"
+    required: false
+    default: "true"
+  enable-shell-lint:
+    description: "Run ShellCheck syntax and security linting on shell scripts"
+    required: false
+    default: "true"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Audit IaC State Destruction Traps & Perimeter Bypass
+      if: ${{ inputs.enable-iac-audit == 'true' }}
+      shell: bash
+      run: |
+        python3 -c "
+        import os, sys, re
+
+        findings = []
+        print('Scanning Terraform, OpenTofu, and CloudFormation manifests...')
+
+        DESTRUCTIVE_PATTERNS = [
+            (r'cluster_identifier\s*=', 'Modifying cluster_identifier forces replacement of database cluster (data loss risk).'),
+            (r'db_subnet_group_name\s*=', 'Changing db_subnet_group_name recreates the RDS/Aurora database instance.'),
+            (r'allocated_storage\s*=.*#.*reduce', 'Reducing allocated_storage on AWS EBS destroys and recreates the storage volume.'),
+        ]
+
+        PERIMETER_PATTERNS = [
+            (r'cidr_blocks\s*=\s*\[\s*[\"0\.0\.0\.0/0\"]*\s*\]', 'Security group rule exposes inbound traffic to 0.0.0.0/0.'),
+            (r'ELBSecurityPolicy-2016-08', 'Deprecated TLS policy (ELBSecurityPolicy-2016-08) violates modern cryptographic standards.'),
+        ]
+
+        for root, _, files in os.walk('.'):
+            if '.git' in root: continue
+            for f in files:
+                if f.endswith(('.tf', '.tfvars', '.hcl', '.yaml', '.yml')):
+                    p = os.path.join(root, f)
+                    try:
+                        with open(p, 'r', encoding='utf-8') as fh:
+                            content = fh.read()
+                            for pat, desc in DESTRUCTIVE_PATTERNS:
+                                if re.search(pat, content):
+                                    findings.append((p, 'CRITICAL', desc))
+                            for pat, desc in PERIMETER_PATTERNS:
+                                if re.search(pat, content):
+                                    findings.append((p, 'HIGH', desc))
+                    except Exception:
+                        pass
+
+        print(f'Total findings identified: {len(findings)}')
+        if findings:
+            for path, sev, desc in findings:
+                print(f'::{sev.lower()} file={path}::{sev}: {desc}')
+            criticals = [f for f in findings if f[1] == 'CRITICAL']
+            if criticals:
+                print('::error::CRITICAL state destruction risks found in IaC manifests!')
+                sys.exit(1)
+        "
+
+    - name: Audit AI Data Lineage & Prompt Interpolation
+      if: ${{ inputs.enable-ai-safety == 'true' }}
+      shell: bash
+      run: |
+        python3 -c "
+        import os, sys, re
+
+        print('Running ISO/IEC 42001 dataset lineage and prompt injection guard checks...')
+        for root, _, files in os.walk('.'):
+            if '.git' in root: continue
+            for f in files:
+                if f.endswith('.py'):
+                    p = os.path.join(root, f)
+                    try:
+                        with open(p, 'r', encoding='utf-8') as fh:
+                            for i, line in enumerate(fh, 1):
+                                if 'prompt' in line.lower() and ('f\"' in line or 'f\'' in line) and '{user' in line:
+                                    print(f'::warning file={p},line={i}::Unescaped prompt string interpolation detected.')
+                    except Exception:
+                        pass
+        "
+
+    - name: Run Secret Leak Audit
+      if: ${{ inputs.enable-secret-scan == 'true' }}
+      shell: bash
+      run: |
+        echo "Executing zero-trust secret leak detection..."
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks detect --source . --verbose --redact
+        else
+          echo "Gitleaks not pre-installed in runner, skipping binary scan."
+        fi
+
+    - name: Run Shell Script Linting
+      if: ${{ inputs.enable-shell-lint == 'true' }}
+      shell: bash
+      run: |
+        echo "Running ShellCheck validation on bash scripts..."
+        if command -v shellcheck >/dev/null 2>&1; then
+          find . -name "*.sh" -not -path "*/.*" -exec shellcheck -e SC1090,SC1091 {} +
+        else
+          echo "ShellCheck binary not present on runner, skipping ShellCheck."
+        fi

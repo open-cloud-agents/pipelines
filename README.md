@@ -1,41 +1,42 @@
-# 🌐 Open Cloud Agents: Decentralized Pipelines
+# 🌐 Open Cloud Agents: Pipelines
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Reusable Workflows](https://img.shields.io/badge/GitHub%20Actions-Reusable%20Workflows-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-open--cloud--agents%2Fpipelines%40v1-blue.svg?logo=githubactions&logoColor=white)](action.yml)
+[![Reusable Workflows](https://img.shields.io/badge/Reusable%20Workflows-.github%2Fworkflows-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/)
 [![Well-Architected](https://img.shields.io/badge/Guardrails-AWS%20%7C%20Azure%20%7C%20GCP-orange.svg)](https://github.com/open-cloud-agents/open-cloud-agents)
 
 **Centralized Governance, Decentralized Execution.**
 
-This repository hosts the official reusable GitHub Actions workflows, composite actions, and CI/CD security pipelines for the **[Open Cloud Agents](https://github.com/open-cloud-agents/open-cloud-agents)** ecosystem.
+This repository hosts the official GitHub Actions, composite actions, and decentralized CI/CD pipelines for the **[Open Cloud Agents](https://github.com/open-cloud-agents)** ecosystem.
 
-Any repository can adopt enterprise-grade **cloud architecture reviews, IaC state destruction prevention (`forces replacement`), ISO/IEC 42001 AI safety audits, and zero-trust secret leak detection** in just 4 lines of YAML.
-
----
-
-## 🏛️ Decentralized Pipeline Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        open-cloud-agents/pipelines (Central Governance)                 │
-│  ├── .github/workflows/cloud-guardrails.yml       (Unified 4-stage audit)              │
-│  ├── .github/workflows/iac-security-audit.yml     (Forces replacement & perimeter)     │
-│  ├── .github/workflows/ai-safety-governance.yml   (ISO 42001 & OWASP LLM prompt AST)  │
-│  └── actions/setup-ocagents/action.yml            (Zero-friction CLI runner setup)     │
-└───────────────────────────────────────────┬────────────────────────────────────────────┘
-                                            │
-               ┌────────────────────────────┼────────────────────────────┐
-               ▼ (uses: @main)              ▼ (uses: @main)              ▼ (uses: @main)
-┌──────────────────────────────┐ ┌──────────────────────────────┐ ┌──────────────────────────────┐
-│  open-cloud-agents           │ │  customer-terraform-repo     │ │  community-microservice      │
-│  (Core Framework Repo)       │ │  (Production AWS / Azure)    │ │  (Kubernetes & AI Apps)      │
-└──────────────────────────────┘ └──────────────────────────────┘ └──────────────────────────────┘
-```
+Any repository can adopt enterprise-grade **cloud architecture reviews, IaC state destruction prevention (`forces replacement`), ISO/IEC 42001 AI safety audits, and zero-trust secret leak detection** in just 2 lines of YAML.
 
 ---
 
-## 🚀 4-Line Quickstart
+## ⚡ Quickstart
 
-Add this file to `.github/workflows/guardrails.yml` in **any** repository:
+You can invoke Open Cloud Agents either as a **Direct Composite Action (Step)** or as a **Full Multi-Job Workflow**:
+
+### Method 1: Direct Action Step (Recommended for existing jobs)
+
+Add this single step to any existing workflow job:
+
+```yaml
+steps:
+  - name: Checkout Code
+    uses: actions/checkout@v4
+
+  - name: Run Cloud Guardrails
+    uses: open-cloud-agents/pipelines@v1 # or open-cloud-agents/pipeline@v1
+    with:
+      enable-iac-audit: true
+      enable-ai-safety: true
+      enable-secret-scan: true
+```
+
+### Method 2: Full Reusable Workflow (Zero configuration)
+
+Create `.github/workflows/guardrails.yml` in **any** repository:
 
 ```yaml
 name: Cloud Guardrails
@@ -44,51 +45,61 @@ on: [push, pull_request]
 
 jobs:
   audit:
-    uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@main
+    uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v1
     with:
       enable-secret-scan: true
       enable-iac-audit: true
       enable-ai-safety: true
 ```
 
-That's it! Every commit and pull request will now automatically be audited for:
+---
+
+## 🏛️ Decentralized Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        open-cloud-agents/pipelines (Central Governance)                 │
+│  ├── action.yml                                   (Root Composite Action @v1)          │
+│  ├── .github/workflows/cloud-guardrails.yml       (Unified 4-stage reusable workflow)  │
+│  ├── .github/workflows/iac-security-audit.yml     (Forces replacement & perimeter)     │
+│  ├── .github/workflows/ai-safety-governance.yml   (ISO 42001 & OWASP LLM prompt AST)  │
+│  └── actions/setup-ocagents/action.yml            (Zero-friction CLI runner setup)     │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │
+               ┌────────────────────────────┼────────────────────────────┐
+               ▼ (uses: @v1)                ▼ (uses: @v1)                ▼ (uses: @v1)
+┌──────────────────────────────┐ ┌──────────────────────────────┐ ┌──────────────────────────────┐
+│  open-cloud-agents           │ │  customer-terraform-repo     │ │  community-microservice      │
+│  (Core Framework Repo)       │ │  (Production AWS / Azure)    │ │  (Kubernetes & AI Apps)      │
+└──────────────────────────────┘ └──────────────────────────────┘ └──────────────────────────────┘
+```
+
+---
+
+## 🛡️ What Gets Audited?
+
+Every commit and pull request is automatically validated against:
+
 1. 🔒 **Secret Leaks:** Scans for unredacted API tokens, private keys, and credentials via Gitleaks.
-2. 💥 **State Destruction Traps:** Detects dangerous Terraform modifications (e.g. `cluster_identifier`) that force resource replacement and data loss.
+2. 💥 **State Destruction Traps:** Detects dangerous Terraform modifications (e.g. `cluster_identifier`) that force resource replacement and database destruction.
 3. 🤖 **AI Safety & Lineage:** Verifies dataset cryptographic hash integrity (ISO 42001) and scans for prompt injection strings.
 4. 🐚 **Shell Security:** Enforces POSIX/bash security standards via ShellCheck.
 
 ---
 
-## 📦 Available Reusable Workflows
+## 📦 Available Invocations
 
-| Reusable Workflow | Purpose | Invocation |
-|---|---|---|
-| [`cloud-guardrails.yml`](.github/workflows/cloud-guardrails.yml) | **Unified 4-Stage Security Audit:** Secrets, IaC destruction traps, AI safety, and shell linting. | `uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@main` |
-| [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | **IaC & Terraform Auditor:** Blocks silent `forces replacement` database wipes and `0.0.0.0/0` perimeter exposures. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@main` |
-| [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | **AI Safety & Lineage:** Audits ISO/IEC 42001 dataset provenance and OWASP Top 10 for LLMs prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@main` |
-
----
-
-## 🧰 Available Composite Actions
-
-You can also use modular composite actions inside your existing custom workflow jobs:
-
-### 1. Setup `ocagents` CLI (`actions/setup-ocagents`)
-
-Installs the standalone Open Cloud Agents CLI directly in your GitHub Actions runner:
-
-```yaml
-steps:
-  - name: Install ocagents CLI
-    uses: open-cloud-agents/pipelines/actions/setup-ocagents@main
-
-  - name: List Available Specialist Agents
-    run: ocagents -agents list
-```
+| Type | Target | Purpose | Invocation |
+|---|---|---|---|
+| **Root Composite Action** | [`action.yml`](action.yml) | Runs full audit suite as a single step inside any existing runner job. | `uses: open-cloud-agents/pipelines@v1` |
+| **Reusable Workflow** | [`cloud-guardrails.yml`](.github/workflows/cloud-guardrails.yml) | Complete standalone 4-stage audit workflow across multiple jobs. | `uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v1` |
+| **Reusable Workflow** | [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | Focused IaC & Terraform auditor for database wipes and perimeter leaks. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@v1` |
+| **Reusable Workflow** | [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | ISO/IEC 42001 dataset provenance and OWASP LLM prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@v1` |
+| **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1` |
 
 ---
 
-## ⚙️ Configuration Reference (`cloud-guardrails.yml`)
+## ⚙️ Configuration Reference
 
 | Input | Type | Default | Description |
 |---|---|---|---|
@@ -96,8 +107,6 @@ steps:
 | `enable-iac-audit` | `boolean` | `true` | Scans Terraform, OpenTofu, and CloudFormation for state destruction traps. |
 | `enable-ai-safety` | `boolean` | `true` | Audits dataset lineage (ISO 42001) and scans for prompt injection vectors. |
 | `enable-shell-lint` | `boolean` | `true` | Lints shell scripts with ShellCheck for POSIX/bash safety. |
-| `python-version` | `string` | `"3.11"` | Python runtime version used for validation tools. |
-| `fail-on-warning` | `boolean` | `false` | When `true`, non-critical warnings block the pipeline. |
 
 ---
 
