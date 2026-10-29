@@ -1,0 +1,19 @@
+# .github/workflows/ci.yml
+# Decentralized CI Guardrails powered by Open Cloud Agents
+name: Cloud Guardrails & Security Review
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cloud-guardrails:
+    name: Cloud Architecture & Security Audit
+    uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@main
+    with:
+      enable-secret-scan: true
+      enable-iac-audit: true
+      enable-ai-safety: true
+      enable-shell-lint: true

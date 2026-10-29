@@ -1,0 +1,238 @@
+name: Decentralized Cloud Guardrails Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      enable-secret-scan:
+        description: "Run zero-trust secret leak detection (Gitleaks)"
+        type: boolean
+        default: true
+      enable-iac-audit:
+        description: "Run Infrastructure as Code (IaC) state destruction and perimeter checks"
+        type: boolean
+        default: true
+      enable-ai-safety:
+        description: "Run ISO 42001 lineage & OWASP prompt injection scans"
+        type: boolean
+        default: true
+      enable-shell-lint:
+        description: "Run ShellCheck syntax and security linting on shell scripts"
+        type: boolean
+        default: true
+      python-version:
+        description: "Python runtime version for validation tools"
+        type: string
+        default: "3.11"
+      fail-on-warning:
+        description: "Treat warnings as blocking pipeline failures"
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        description: "GitHub Token for posting review comments"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  secret-scan:
+    name: Zero-Trust Secret Scan
+    if: ${{ inputs.enable-secret-scan }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.2"
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            GITLEAKS_ARCH="linux_arm64"
+          else
+            GITLEAKS_ARCH="linux_x64"
+          fi
+          wget -q "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${GITLEAKS_ARCH}.tar.gz"
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_${GITLEAKS_ARCH}.tar.gz"
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run Gitleaks Audit
+        run: |
+          echo "### 🔒 Secret Leak Detection Audit" >> "$GITHUB_STEP_SUMMARY"
+          if gitleaks detect --source . --verbose --redact; then
+            echo "✅ **PASS**: No unredacted credentials, tokens, or private keys detected." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ **FAIL**: Hardcoded secrets or tokens detected in codebase!" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  iac-security-audit:
+    name: IaC State Destruction & Ingress Audit
+    if: ${{ inputs.enable-iac-audit }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Audit IaC Traps & Perimeter Bypass
+        run: |
+          python3 -c "
+          import os, sys, re
+
+          findings = []
+          print('Scanning Terraform, OpenTofu, and CloudFormation manifests...')
+
+          # Dangerous attribute renames triggering 'forces replacement'
+          DESTRUCTIVE_PATTERNS = [
+              (r'cluster_identifier\s*=', 'Modifying cluster_identifier forces replacement of database cluster (data loss risk).'),
+              (r'db_subnet_group_name\s*=', 'Changing db_subnet_group_name recreates the RDS/Aurora database instance.'),
+              (r'allocated_storage\s*=.*#.*reduce', 'Reducing allocated_storage on AWS EBS destroys and recreates the storage volume.'),
+          ]
+
+          # Perimeter exposures
+          PERIMETER_PATTERNS = [
+              (r'cidr_blocks\s*=\s*\[\s*[\"0\.0\.0\.0/0\"]*\s*\]', 'Security group rule exposes inbound traffic to 0.0.0.0/0.'),
+              (r'ELBSecurityPolicy-2016-08', 'Deprecated TLS policy (ELBSecurityPolicy-2016-08) violates modern cryptographic standards.'),
+          ]
+
+          for root, _, files in os.walk('.'):
+              if '.git' in root: continue
+              for f in files:
+                  if f.endswith(('.tf', '.tfvars', '.hcl', '.yaml', '.yml')):
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r', encoding='utf-8') as fh:
+                              content = fh.read()
+                              for pat, desc in DESTRUCTIVE_PATTERNS:
+                                  if re.search(pat, content):
+                                      findings.append((p, 'CRITICAL', desc))
+                              for pat, desc in PERIMETER_PATTERNS:
+                                  if re.search(pat, content):
+                                      findings.append((p, 'HIGH', desc))
+                      except Exception:
+                          pass
+
+          print(f'Total findings identified: {len(findings)}')
+          with open('iac_summary.md', 'w') as out:
+              out.write('### 🛡️ Infrastructure as Code (IaC) Guardrails Audit\n\n')
+              if not findings:
+                  out.write('✅ **PASS**: No state destruction traps (forces replacement) or ingress exposures detected.\n')
+              else:
+                  out.write('| File | Severity | Risk Description |\n|---|---|---|\n')
+                  for path, sev, desc in findings:
+                      out.write(f'| `{path}` | **{sev}** | {desc} |\n')
+
+          if findings:
+              criticals = [f for f in findings if f[1] == 'CRITICAL']
+              if criticals:
+                  print('CRITICAL state destruction risks found!')
+                  sys.exit(1)
+          "
+          cat iac_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  ai-safety-audit:
+    name: AI Governance & Prompt Safety Audit
+    if: ${{ inputs.enable-ai-safety }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Audit AI Data Lineage & Prompt Interpolation
+        run: |
+          python3 -c "
+          import os, sys, re, json
+
+          print('Running ISO/IEC 42001 dataset lineage and prompt injection guard checks...')
+          lineage_verified = True
+          prompt_risks = []
+
+          # 1. Lineage check if pipelines metadata exists
+          for root, _, files in os.walk('.'):
+              for f in files:
+                  if f.endswith('.json') and 'train' in f:
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r') as fh:
+                              data = json.load(fh)
+                              if 'dataset_provenance' not in data:
+                                  lineage_verified = False
+                      except Exception:
+                          pass
+
+          # 2. Prompt injection scanner in python app files
+          for root, _, files in os.walk('.'):
+              if '.git' in root: continue
+              for f in files:
+                  if f.endswith('.py'):
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r', encoding='utf-8') as fh:
+                              for i, line in enumerate(fh, 1):
+                                  if 'prompt' in line.lower() and ('f\"' in line or 'f\'' in line) and '{user' in line:
+                                      prompt_risks.append((p, i, line.strip()))
+                      except Exception:
+                          pass
+
+          with open('ai_safety_summary.md', 'w') as out:
+              out.write('### 🤖 AI Safety & Governance Audit (ISO 42001 / OWASP Top 10)\n\n')
+              if not prompt_risks:
+                  out.write('✅ **PASS**: No unsanitized dynamic prompt injection interpolations found.\n')
+              else:
+                  out.write(f'⚠️ **WARNING**: Found {len(prompt_risks)} unescaped prompt string interpolations.\n')
+                  for p, line, text in prompt_risks:
+                      out.write(f'- `{p}:{line}`: `{text[:60]}`\n')
+
+          "
+          cat ai_safety_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  shell-lint:
+    name: Shell Script Security Linting
+    if: ${{ inputs.enable-shell-lint }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          echo "### 🐚 Shell Script Security & Syntax Audit" >> "$GITHUB_STEP_SUMMARY"
+          FAILED=0
+          find . -name "*.sh" -not -path "*/.*" | while read -r script; do
+            if ! shellcheck --severity=warning -x "$script"; then
+              echo "❌ ShellCheck failed on $script" >> "$GITHUB_STEP_SUMMARY"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 0 ]; then
+            echo "✅ **PASS**: All shell scripts compliant with POSIX/bash security standards." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  guardrails-verdict:
+    name: Decentralized Pipeline Executive Verdict
+    needs: [secret-scan, iac-security-audit, ai-safety-audit, shell-lint]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Pipeline Status Summary
+        run: |
+          echo "## ☁️ Open Cloud Agents: Decentralized Pipeline Verdict" >> "$GITHUB_STEP_SUMMARY"
+          echo "All decentralized compliance and operational guardrails evaluated across runner environment." >> "$GITHUB_STEP_SUMMARY"

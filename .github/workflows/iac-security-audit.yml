@@ -1,0 +1,77 @@
+name: Reusable IaC Security & State Destruction Audit
+
+on:
+  workflow_call:
+    inputs:
+      terraform-dir:
+        description: "Target directory containing Terraform/OpenTofu files"
+        type: string
+        default: "."
+      fail-on-destructive-changes:
+        description: "Fail the job if state destruction attributes (forces replacement) are modified"
+        type: boolean
+        default: true
+    outputs:
+      audit-verdict:
+        description: "The audit verdict: PASSED or BLOCKED"
+        value: ${{ jobs.iac-audit.outputs.verdict }}
+
+jobs:
+  iac-audit:
+    name: Terraform & Kubernetes Guardrail Scanner
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.scan.outputs.verdict }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scan IaC Manifests for Destruction Traps
+        id: scan
+        run: |
+          python3 -c "
+          import os, sys, re
+
+          target_dir = '${{ inputs.terraform-dir }}'
+          fail_on_destruction = '${{ inputs.fail-on-destructive-changes }}' == 'true'
+          print(f'Scanning directory: {target_dir} for cloud state destruction traps...')
+
+          CRITICAL_TRAPS = [
+              (r'cluster_identifier\s*=', 'AWS RDS/Aurora: Renaming cluster_identifier deletes and replaces the cluster!'),
+              (r'db_subnet_group_name\s*=', 'AWS RDS: Changing db_subnet_group_name forces recreation of database instance!'),
+              (r'allocated_storage\s*=.*#.*decrease', 'Storage contraction forces EBS volume replacement!'),
+              (r'storage_account_name\s*=', 'Azure Storage: Renaming storage_account_name forces account deletion!'),
+          ]
+
+          violations = []
+          for root, _, files in os.walk(target_dir):
+              for f in files:
+                  if f.endswith(('.tf', '.hcl', '.yaml', '.yml')):
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r', encoding='utf-8') as fh:
+                              txt = fh.read()
+                              for pat, msg in CRITICAL_TRAPS:
+                                  if re.search(pat, txt):
+                                      violations.append((p, msg))
+                      except Exception:
+                          pass
+
+          print(f'Total state destruction traps detected: {len(violations)}')
+          if violations:
+              print('::error::State destruction traps detected in IaC manifests!')
+              for path, msg in violations:
+                  print(f'::error file={path}::{msg}')
+              if fail_on_destruction:
+                  print('verdict=BLOCKED', file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+                  sys.exit(1)
+          
+          print('verdict=PASSED', file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          "
