@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-open--cloud--agents%2Fpipelines%40v1-blue.svg?logo=githubactions&logoColor=white)](action.yml)
 [![Reusable Workflows](https://img.shields.io/badge/Reusable%20Workflows-.github%2Fworkflows-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/)
-[![Well-Architected](https://img.shields.io/badge/Guardrails-AWS%20%7C%20Azure%20%7C%20GCP-orange.svg)](https://github.com/open-cloud-agents/open-cloud-agents)
+[![Well-Architected](https://img.shields.io/badge/Guardrails-AWS%20%7C%20Azure%20%7C%20GCP-orange.svg)](https://github.com/open-cloud-agents/ocagents)
 
 **Centralized Governance, Decentralized Execution.**
 
