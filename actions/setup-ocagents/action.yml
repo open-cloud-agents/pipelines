@@ -15,7 +15,7 @@ runs:
       shell: bash
       run: |
         echo "Installing Open Cloud Agents CLI v${{ inputs.version }}..."
-        curl -fsSL https://ibrahimng.github.io/open-cloud-agents/install.sh | bash
+        curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Verify CLI Installation
