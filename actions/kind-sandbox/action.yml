@@ -1,0 +1,50 @@
+name: "KinD Sandbox Manifest Verification"
+description: "Executes ephemeral KinD sandbox dry-runs and cluster tests using ocagents sandbox"
+author: "Ibrahim Jimoh"
+
+inputs:
+  manifest-path:
+    description: "Path to Kubernetes YAML manifest or directory"
+    required: false
+  helm-chart:
+    description: "Path to Helm chart directory"
+    required: false
+  kustomize-path:
+    description: "Path to Kustomize overlay directory"
+    required: false
+  k8s-version:
+    description: "Target Kubernetes version (e.g. v1.31.0, v1.30.2)"
+    required: false
+    default: "v1.30.2"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure KinD and kubectl are Installed
+      shell: bash
+      run: |
+        if ! command -v kind >/dev/null 2>&1; then
+          echo "Installing KinD..."
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+        fi
+        if ! command -v kubectl >/dev/null 2>&1; then
+          echo "Installing kubectl ${{ inputs.k8s-version }}..."
+          curl -Lo /tmp/kubectl "https://dl.k8s.io/release/${{ inputs.k8s-version }}/bin/linux/amd64/kubectl"
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+        fi
+
+    - name: Execute ocagents sandbox
+      shell: bash
+      run: |
+        ARGS=""
+        if [ -n "${{ inputs.manifest-path }}" ]; then
+          ARGS="--manifest ${{ inputs.manifest-path }}"
+        elif [ -n "${{ inputs.helm-chart }}" ]; then
+          ARGS="--helm ${{ inputs.helm-chart }}"
+        elif [ -n "${{ inputs.kustomize-path }}" ]; then
+          ARGS="--kustomize ${{ inputs.kustomize-path }}"
+        fi
+        ocagents sandbox $ARGS --k8s-version "${{ inputs.k8s-version }}"

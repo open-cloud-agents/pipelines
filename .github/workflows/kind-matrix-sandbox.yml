@@ -1,0 +1,49 @@
+name: "KinD Sandbox CI Matrix"
+
+on:
+  workflow_call:
+    inputs:
+      manifest-path:
+        description: "Path to Kubernetes YAML manifests"
+        required: false
+        type: string
+        default: ""
+      helm-chart:
+        description: "Path to Helm chart"
+        required: false
+        type: string
+        default: ""
+      kustomize-path:
+        description: "Path to Kustomize overlay"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  kind-matrix:
+    name: "KinD Sandbox Matrix (${{ matrix.k8s-version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s-version:
+          - "v1.31.0"
+          - "v1.30.2"
+          - "v1.29.4"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup ocagents CLI
+        uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1
+
+      - name: Run KinD Sandbox Verification
+        uses: open-cloud-agents/pipelines/actions/kind-sandbox@v1
+        with:
+          manifest-path: ${{ inputs.manifest-path }}
+          helm-chart: ${{ inputs.helm-chart }}
+          kustomize-path: ${{ inputs.kustomize-path }}
+          k8s-version: ${{ matrix.k8s-version }}
