@@ -24,7 +24,7 @@ Add this single step to any existing workflow job:
 ```yaml
 steps:
   - name: Checkout Code
-    uses: actions/checkout@v4
+    uses: actions/checkout@v7
 
   - name: Run Cloud Guardrails
     uses: open-cloud-agents/pipelines@v1 # or open-cloud-agents/pipeline@v1
@@ -51,6 +51,49 @@ jobs:
       enable-iac-audit: true
       enable-ai-safety: true
 ```
+
+---
+
+## 👥 Who Is This For?
+
+| Role / Team | Primary Problems Solved | How the Pipeline Delivers Value |
+|---|---|---|
+| **Platform & Cloud Architects** | Unverified architecture proposals from AI assistants; missing disaster recovery or high-availability invariants. | Validates infrastructure against **AWS, Azure, and GCP Well-Architected Frameworks**, enforcing RTO/RPO targets, multi-AZ failovers, and KMS CMK envelope encryption. |
+| **DevSecOps & Security Engineers** | Accidental credential commits, open security groups (`0.0.0.0/0`), wildcard IAM policies, and perimeter bypasses. | Runs automated diff audits on pull requests, scans for secrets via Gitleaks, enforces CIS benchmarks, and blocks dangerous IAM escalations. |
+| **SRE & Reliability Engineers** | Silent production outages caused by cascading restarts, missing Kubernetes probes, or unbuffered CPU CFS throttling. | Verifies Kubernetes manifests for production invariants: guaranteed QoS, PodDisruptionBudgets, non-destructive `preStop` hooks, and isolated health checks. |
+| **FinOps & Engineering Leads** | Surprise cloud bills from idle NAT Gateways ($32+/mo each), over-provisioned CPU/RAM, and orphaned disk snapshots. | Automatically flags cost leaks and orphaned cloud assets before infrastructure provisioning occurs. |
+| **AI/ML Platform & Compliance Teams** | Regulatory pressure around AI safety (EU AI Act, ISO/IEC 42001) and OWASP Top 10 for LLM vulnerabilities. | Tracks training data provenance/lineage and scans for prompt injection vectors and toxic payload structures in CI. |
+
+---
+
+## 📍 Where Can It Be Used?
+
+### 1. Pre-Merge CI/CD Pull Request Gateways *(The Flagship Use Case)*
+* **Environments:** GitHub Actions, GitLab CI, Azure DevOps, Bitbucket Pipelines.
+* **How it works:** When a developer or AI assistant submits a PR containing Terraform, OpenTofu, Kubernetes YAML, or Helm charts:
+  1. The pipeline inspects the diff for **state destruction traps** (`forces replacement` on RDS clusters, VPCs, or storage buckets).
+  2. Runs secret leak detection (Gitleaks) and ShellCheck linting.
+  3. Evaluates security perimeter rules (e.g. blocking public IP bindings on internal services).
+  4. Generates an automated, auditable review verdict directly on the pull request.
+* **Impact:** Eliminates human fatigue by preventing catastrophic database wipes and perimeter leaks automatically.
+
+### 2. Local Workstations & Shift-Left IDE Pair Programming
+* **Environments:** Terminal CLI (`ocagents`), VS Code (GitHub Copilot), Cursor, Claude Code.
+* **How it works:**
+  - **Git Pre-Commit Hook:** Catches plaintext secrets or unvalidated prompt concatenations on your machine before `git push`.
+  - **Standalone CLI (`ocagents run --task "..."`):** Lets engineers simulate a full multi-agent architectural review locally in under 3 seconds without external cloud calls or token costs.
+  - **Specialist Sync (`ocagents sync -A`):** Injects hardened rules into `.cursor/rules/` or `.github/agents/` so coding assistants write compliant IaC from line 1.
+
+### 3. Regulated & Compliance-Heavy Industries
+* **Environments:** FinTech, HealthTech (HIPAA), Public Sector, and Enterprises preparing for **SOC 2, ISO 27001, ISO 42001, or EU AI Act audits**.
+* **How it works:** 
+  - Replaces manual spreadsheets with automated 4-layer CIS benchmarks (Cloud Foundations, Kubernetes, Linux Hosts, Docker).
+  - Generates immutable JSON execution traces and SLSA Level 3 build provenance records that can be handed directly to external auditors as proof of technical control enforcement.
+
+### 4. GitOps & Multi-Environment Delivery Pipelines
+* **Environments:** ArgoCD, Flux CD, Spinnaker, Kubernetes Clusters.
+* **How it works:**
+  - Placed before promotion stages (`dev` ➔ `uat` ➔ `prod`) to enforce automated canary rollouts, verify container image signatures, and require formal human approval gates before production cluster state changes.
 
 ---
 
