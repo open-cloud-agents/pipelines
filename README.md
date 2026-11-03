@@ -24,7 +24,7 @@ Add this single step to any existing workflow job:
 ```yaml
 steps:
   - name: Checkout Code
-    uses: actions/checkout@v7
+    uses: actions/checkout@v4
 
   - name: Run Cloud Guardrails
     uses: open-cloud-agents/pipelines@v1 # or open-cloud-agents/pipeline@v1

@@ -48,3 +48,4 @@ runs:
           ARGS="--kustomize ${{ inputs.kustomize-path }}"
         fi
         ocagents sandbox $ARGS --k8s-version "${{ inputs.k8s-version }}"
+

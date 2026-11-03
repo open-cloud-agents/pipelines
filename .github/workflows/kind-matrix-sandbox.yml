@@ -47,3 +47,4 @@ jobs:
           helm-chart: ${{ inputs.helm-chart }}
           kustomize-path: ${{ inputs.kustomize-path }}
           k8s-version: ${{ matrix.k8s-version }}
+
