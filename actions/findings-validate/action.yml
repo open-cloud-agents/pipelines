@@ -66,14 +66,14 @@ runs:
           CLI_BIN="ocagents"
         fi
 
-        ARGS="findings validate $FINDINGS_PATH --repo-root $REPO_ROOT"
+        declare -a args=("findings" "validate" "$FINDINGS_PATH" "--repo-root" "$REPO_ROOT")
         if [ -n "$DIFF_TARGET" ]; then
-          ARGS="$ARGS --diff $DIFF_TARGET"
+          args+=("--diff" "$DIFF_TARGET")
         fi
 
-        echo "Validating findings via: $CLI_BIN $ARGS..."
+        echo "Validating findings via: $CLI_BIN ${args[*]}..."
         set +e
-        OUTPUT=$($CLI_BIN $ARGS 2>&1)
+        OUTPUT=$("$CLI_BIN" "${args[@]}" 2>&1)
         EXIT_CODE=$?
         set -e
 
@@ -92,3 +92,4 @@ runs:
             exit "$EXIT_CODE"
           fi
         fi
+

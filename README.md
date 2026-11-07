@@ -34,7 +34,35 @@ steps:
       enable-secret-scan: true
 ```
 
-### Method 2: Full Reusable Workflow (Zero configuration)
+### Method 2: Stage 1 Deterministic Pre-Flight Gatekeeper
+
+Run strict, fail-closed pre-merge screening before consuming AI reasoning or merging changesets:
+
+```yaml
+steps:
+  - name: Checkout Code
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - name: Run Deterministic Pre-Flight Gate
+    uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v1
+    with:
+      diff-target: "main"
+      install-linters: true        # Provisions pinned ruff (0.17.4) and shellcheck
+      install-iac-scanners: true   # Provisions pinned checkov (3.2.368) if changeset modifies IaC
+      strict: false                # When true, escalates missing advisory scanners to exit code 1
+```
+
+> [!TIP]
+> **Python Extras Alternative:** In environments with existing Python setups, you can provision pinned scanners via `pip install "open-cloud-agents[preflight]"` or `pip install -r packaging/requirements-scanners.txt`.
+
+### Method 3: Full Reusable Workflow (Zero configuration)
 
 Create `.github/workflows/guardrails.yml` in **any** repository:
 
@@ -138,10 +166,22 @@ Every commit and pull request is automatically validated against:
 | **Reusable Workflow** | [`cloud-guardrails.yml`](.github/workflows/cloud-guardrails.yml) | Complete standalone 4-stage audit workflow across multiple jobs. | `uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v1` |
 | **Reusable Workflow** | [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | Focused IaC & Terraform auditor for database wipes and perimeter leaks. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@v1` |
 | **Reusable Workflow** | [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | ISO/IEC 42001 dataset provenance and OWASP LLM prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@v1` |
-| **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1` |
+| **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs and cryptographically verifies `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1` |
 | **Modular Action** | [`findings-validate`](actions/findings-validate/action.yml) | Validates findings against `schemas/v1/finding.json` and checks diff/repo anchors. | `uses: open-cloud-agents/pipelines/actions/findings-validate@v1` |
-| **Modular Action** | [`deterministic-preflight`](actions/deterministic-preflight/action.yml) | Stage 1 pre-flight runner (`ocagents preflight --diff`) with fail-closed availability protocol. | `uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v1` |
+| **Modular Action** | [`deterministic-preflight`](actions/deterministic-preflight/action.yml) | Stage 1 pre-flight runner (`ocagents preflight --diff`) with fail-closed availability protocol and pinned scanners. | `uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v1` |
 | **Modular Action** | [`kind-sandbox`](actions/kind-sandbox/action.yml) | Ephemeral KinD sandbox dry-runs and cluster tests. | `uses: open-cloud-agents/pipelines/actions/kind-sandbox@v1` |
+
+---
+
+## 🛡️ Deterministic Pre-Flight Gatekeeper & Toolchains
+
+The `deterministic-preflight` composite action enforces **Stage 1 Deterministic Pre-Flight Gatekeeping** before specialist agent loops or merge operations:
+
+1. **Fail-Closed Availability Protocol:** If a file in the changeset requires a scanner (e.g., Checkov for `.tf` files, Ruff for `.py` files, ShellCheck for `.sh` files) and that scanner is missing without an active signed exception in `.ocagents/exceptions.json`, the gate **halts immediately with exit code 1 (`INCOMPLETE_CHECK_FAILED`)**.
+2. **Pinned Scanner Versions:** CI installs use immutable pinned versions (`ruff==0.17.4`, `checkov==3.2.368`, `shellcheck 0.10.0`). If provisioning fails, the action fails immediately rather than silently swallowing the error.
+3. **Safe Argument Construction:** CLI arguments are parsed and forwarded using quoted Bash array expansions (`"${args[@]}"`), preventing argument word-splitting and shell injection vulnerabilities.
+4. **CodeQL Strategy:** CodeQL database compilation and semantic analysis are workflow-level operations best managed via GitHub's official CodeQL Action (`github/codeql-action/init@v3` and `github/codeql-action/analyze@v3`). In local or composite runs where a pre-built CodeQL database is unavailable, preflight transparently records CodeQL as `ADVISORY` (exit code `2`, `INCONCLUSIVE_PARTIAL_AUDIT`), ensuring coverage degradation is reported without false claims of execution.
+5. **Lean Standalone CLI Invariant:** The core `ocagents` standalone binary remains lean (~14MB). Heavy scanners and language runtimes (Java for CodeQL, Python packages for Checkov) are managed explicitly via CI pipelines, package managers (`brew`, `apt`), or the `[preflight]` Python extra.
 
 ---
 

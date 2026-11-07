@@ -23,6 +23,30 @@ inputs:
     description: "Path to write structured JSON execution report"
     required: false
     default: "preflight_report.json"
+  install-linters:
+    description: "Automatically provision required base linters (Ruff and ShellCheck)"
+    required: false
+    default: "true"
+  install-iac-scanners:
+    description: "Automatically provision IaC security scanner (Checkov) for changesets modifying Terraform, Helm, or Kubernetes manifests"
+    required: false
+    default: "false"
+  ruff-version:
+    description: "Pinned version of Ruff Python linter"
+    required: false
+    default: "0.17.4"
+  checkov-version:
+    description: "Pinned version of Checkov IaC scanner"
+    required: false
+    default: "3.2.368"
+  ocagents-version:
+    description: "Pinned version of ocagents CLI to install if not present on PATH"
+    required: false
+    default: "1.5.0"
+  codeql-db-path:
+    description: "Optional path to a pre-compiled CodeQL database for local SAST inspection (workflow-level analysis should use github/codeql-action)"
+    required: false
+    default: ""
   codeql-suite:
     description: "CodeQL query suite or pack (default: python-security-and-quality.qls)"
     required: false
@@ -45,31 +69,117 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Ensure Prerequisites & Linters Installed
+    - name: Provision Required Linters & Scanners
       shell: bash
+      env:
+        INSTALL_LINTERS: ${{ inputs.install-linters }}
+        INSTALL_IAC: ${{ inputs.install-iac-scanners }}
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+        CHECKOV_VERSION: ${{ inputs.checkov-version }}
       run: |
-        if ! command -v ruff >/dev/null 2>&1; then
-          echo "Installing ruff linter..."
-          python3 -m pip install --quiet ruff || true
+        set -euo pipefail
+
+        if [ "$INSTALL_LINTERS" = "true" ]; then
+          if ! command -v ruff >/dev/null 2>&1; then
+            echo "📦 Provisioning pinned Ruff linter (ruff==${RUFF_VERSION})..."
+            python3 -m pip install "ruff==${RUFF_VERSION}"
+          fi
+
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+              echo "📦 Provisioning shellcheck via apt..."
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq shellcheck
+            elif command -v brew >/dev/null 2>&1; then
+              echo "📦 Provisioning shellcheck via brew..."
+              brew install shellcheck
+            else
+              echo "::error::Neither apt-get nor brew found to install required scanner 'shellcheck'!"
+              exit 1
+            fi
+          fi
         fi
-        if ! command -v shellcheck >/dev/null 2>&1; then
-          if command -v apt-get >/dev/null 2>&1; then
-            echo "Installing shellcheck via apt..."
-            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck || true
+
+        if [ "$INSTALL_IAC" = "true" ]; then
+          if ! command -v checkov >/dev/null 2>&1; then
+            echo "📦 Provisioning pinned Checkov IaC scanner (checkov==${CHECKOV_VERSION})..."
+            python3 -m pip install "checkov==${CHECKOV_VERSION}"
           fi
         fi
 
     - name: Ensure ocagents CLI is Available
       shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.ocagents-version }}
       run: |
+        set -euo pipefail
+
         if command -v ocagents >/dev/null 2>&1; then
-          echo "ocagents CLI found on PATH."
+          echo "✔ ocagents CLI found on PATH ($(command -v ocagents))."
         elif [ -f "./bin/ocagents" ]; then
-          echo "Using local ./bin/ocagents."
+          echo "✔ Using local ./bin/ocagents repository launcher."
         else
-          echo "Installing Open Cloud Agents CLI..."
-          curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "📥 Installing Open Cloud Agents CLI v${REQUESTED_VERSION} with checksum verification..."
+          VERSION="${REQUESTED_VERSION#v}"
+          BIN_DIR="$HOME/.local/bin"
+          mkdir -p "$BIN_DIR"
+
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+
+          case "$OS" in
+            darwin)
+              case "$ARCH" in
+                arm64|aarch64) PLATFORM="darwin-arm64" ;;
+                x86_64) PLATFORM="darwin-amd64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            linux)
+              case "$ARCH" in
+                x86_64) PLATFORM="linux-amd64" ;;
+                arm64|aarch64) PLATFORM="linux-arm64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            *)
+              echo "::error::Unsupported OS: $OS"; exit 1
+              ;;
+          esac
+
+          ARCHIVE_NAME="ocagents-${PLATFORM}.tar.gz"
+          RELEASE_URL="https://github.com/open-cloud-agents/ocagents/releases/download/v${VERSION}"
+
+          TMP_DIR=$(mktemp -d)
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          curl -fsSL --retry 3 --retry-connrefused "${RELEASE_URL}/${ARCHIVE_NAME}" -o "$TMP_DIR/$ARCHIVE_NAME"
+          curl -fsSL --retry 3 --retry-connrefused "${RELEASE_URL}/checksums.txt" -o "$TMP_DIR/checksums.txt"
+
+          EXPECTED_SHA=$(grep -E "${ARCHIVE_NAME}$" "$TMP_DIR/checksums.txt" | awk '{print $1}')
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "::error::Could not find SHA-256 digest for ${ARCHIVE_NAME} in checksums.txt!"
+            exit 1
+          fi
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "$TMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+          else
+            ACTUAL_SHA=$(shasum -a 256 "$TMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+          fi
+
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "::error::Checksum mismatch for ${ARCHIVE_NAME}!"
+            echo "Expected: $EXPECTED_SHA"
+            echo "Actual:   $ACTUAL_SHA"
+            exit 1
+          fi
+
+          tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$BIN_DIR"
+          chmod +x "$BIN_DIR/ocagents"
+          ln -sf "$BIN_DIR/ocagents" "$BIN_DIR/oca"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+          echo "✔ Verified and installed ocagents v${VERSION} to $BIN_DIR"
         fi
 
     - name: Execute Deterministic Pre-Flight Gate
@@ -81,6 +191,7 @@ runs:
         STRICT_FLAG: ${{ inputs.strict }}
         SIGNING_KEY: ${{ inputs.signing-key }}
         EXPORT_JSON: ${{ inputs.export-json }}
+        CODEQL_DB_PATH: ${{ inputs.codeql-db-path }}
         CODEQL_SUITE: ${{ inputs.codeql-suite }}
       run: |
         export PATH="$HOME/.local/bin:$PATH"
@@ -93,26 +204,40 @@ runs:
           CLI_BIN="ocagents"
         fi
 
-        ARGS="preflight --json"
+        # Assemble CLI invocation using safe Bash array to prevent word-splitting and injection
+        declare -a args=("preflight" "--json")
+
         if [ -n "$DIFF_TARGET" ]; then
-          ARGS="$ARGS --diff $DIFF_TARGET"
+          args+=("--diff" "$DIFF_TARGET")
         fi
+
         if [ "$STRICT_FLAG" = "true" ]; then
-          ARGS="$ARGS --strict"
+          args+=("--strict")
         fi
+
         if [ -n "$SIGNING_KEY" ]; then
           export OCAGENTS_SIGNATURE_KEY="$SIGNING_KEY"
         fi
-        if [ -n "$CODEQL_SUITE" ]; then
-          ARGS="$ARGS --codeql-suite $CODEQL_SUITE"
-        fi
-        if [ -n "$TARGET_PATHS" ]; then
-          ARGS="$ARGS $TARGET_PATHS"
+
+        if [ -n "$CODEQL_DB_PATH" ]; then
+          args+=("--codeql-db" "$CODEQL_DB_PATH")
         fi
 
-        echo "Executing $CLI_BIN $ARGS..."
+        if [ -n "$CODEQL_SUITE" ]; then
+          args+=("--codeql-suite" "$CODEQL_SUITE")
+        fi
+
+        if [ -n "$TARGET_PATHS" ]; then
+          while IFS= read -r path_item; do
+            if [ -n "$path_item" ]; then
+              args+=("$path_item")
+            fi
+          done < <(echo "$TARGET_PATHS" | tr ' ' '\n')
+        fi
+
+        echo "Executing $CLI_BIN ${args[*]}..."
         set +e
-        $CLI_BIN $ARGS > "$EXPORT_JSON"
+        "$CLI_BIN" "${args[@]}" > "$EXPORT_JSON"
         EXIT_CODE=$?
         set -e
 
@@ -127,9 +252,9 @@ runs:
           echo "✅ Deterministic pre-flight gate PASSED cleanly (exit 0)."
         elif [ "$EXIT_CODE" -eq 2 ]; then
           echo "verdict=ADVISORY" >> "$GITHUB_OUTPUT"
-          echo "⚠️ Deterministic pre-flight gate completed with ADVISORY warnings or missing advisory scanners (exit 2)."
+          echo "⚠️ Deterministic pre-flight gate completed with ADVISORY warnings or degraded coverage (exit 2)."
           if [ "$STRICT_FLAG" = "true" ]; then
-            echo "::error::Pre-flight advisory warnings escalated to failure in strict mode!"
+            echo "::error::Pre-flight advisory warnings or missing tools escalated to failure in strict mode!"
             exit 1
           fi
         else

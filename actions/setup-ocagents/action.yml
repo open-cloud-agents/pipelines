@@ -1,24 +1,137 @@
 name: "Setup Open Cloud Agents CLI (ocagents)"
-description: "Installs and configures the standalone ocagents CLI in any GitHub Actions runner"
+description: "Installs and verifies the standalone ocagents CLI in any GitHub Actions runner with cryptographic SHA-256 verification"
 author: "Ibrahim Jimoh"
 
 inputs:
   version:
-    description: "Version of ocagents to install"
+    description: "Version of ocagents to install (e.g. '1.5.0' or 'latest')"
     required: false
-    default: "1.3.0"
+    default: "1.5.0"
+  verify-checksum:
+    description: "Cryptographically verify downloaded binary against official checksums.txt"
+    required: false
+    default: "true"
+
+outputs:
+  version:
+    description: "Installed version of ocagents"
+    value: ${{ steps.install.outputs.version }}
+  executable:
+    description: "Absolute path to the installed ocagents executable"
+    value: ${{ steps.install.outputs.executable }}
 
 runs:
   using: "composite"
   steps:
-    - name: Download & Install ocagents CLI
+    - name: Download & Verify ocagents CLI
+      id: install
       shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.version }}
+        VERIFY_CHECKSUM: ${{ inputs.verify-checksum }}
       run: |
-        echo "Installing Open Cloud Agents CLI v${{ inputs.version }}..."
-        curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        set -euo pipefail
+
+        RAW_VERSION="${REQUESTED_VERSION:-1.5.0}"
+        VERSION="${RAW_VERSION#v}"
+        BIN_DIR="$HOME/.local/bin"
+        mkdir -p "$BIN_DIR"
+
+        OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        ARCH="$(uname -m)"
+
+        case "$OS" in
+          darwin)
+            case "$ARCH" in
+              arm64|aarch64) PLATFORM="darwin-arm64" ;;
+              x86_64) PLATFORM="darwin-amd64" ;;
+              *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+            esac
+            ARCHIVE_EXT="tar.gz"
+            ;;
+          linux)
+            case "$ARCH" in
+              x86_64) PLATFORM="linux-amd64" ;;
+              arm64|aarch64) PLATFORM="linux-arm64" ;;
+              *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+            esac
+            ARCHIVE_EXT="tar.gz"
+            ;;
+          msys*|mingw*|cygwin*|windows*)
+            PLATFORM="windows-amd64"
+            ARCHIVE_EXT="zip"
+            ;;
+          *)
+            echo "::error::Unsupported OS: $OS"; exit 1
+            ;;
+        esac
+
+        ARCHIVE_NAME="ocagents-${PLATFORM}.${ARCHIVE_EXT}"
+
+        if [ "$VERSION" = "latest" ]; then
+          RELEASE_BASE_URL="https://github.com/open-cloud-agents/ocagents/releases/latest/download"
+        else
+          RELEASE_BASE_URL="https://github.com/open-cloud-agents/ocagents/releases/download/v${VERSION}"
+        fi
+
+        DOWNLOAD_URL="${RELEASE_BASE_URL}/${ARCHIVE_NAME}"
+        CHECKSUMS_URL="${RELEASE_BASE_URL}/checksums.txt"
+
+        TMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIR"' EXIT
+
+        echo "📥 Downloading Open Cloud Agents CLI v${VERSION} (${ARCHIVE_NAME}) from ${DOWNLOAD_URL}..."
+        if ! curl -fsSL --retry 3 --retry-connrefused "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE_NAME"; then
+          echo "::error::Failed to download ${ARCHIVE_NAME} from ${DOWNLOAD_URL}."
+          exit 1
+        fi
+
+        if [ "$VERIFY_CHECKSUM" = "true" ]; then
+          echo "🔒 Fetching checksums.txt and verifying SHA-256 digest..."
+          if ! curl -fsSL --retry 3 --retry-connrefused "$CHECKSUMS_URL" -o "$TMP_DIR/checksums.txt"; then
+            echo "::error::Failed to download checksums.txt from ${CHECKSUMS_URL}."
+            exit 1
+          fi
+
+          EXPECTED_SHA=$(grep -E "${ARCHIVE_NAME}$" "$TMP_DIR/checksums.txt" | awk '{print $1}')
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "::error::Could not find SHA-256 digest for ${ARCHIVE_NAME} in checksums.txt!"
+            exit 1
+          fi
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "$TMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+          else
+            ACTUAL_SHA=$(shasum -a 256 "$TMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+          fi
+
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "::error::Checksum verification failed for ${ARCHIVE_NAME}!"
+            echo "Expected: $EXPECTED_SHA"
+            echo "Actual:   $ACTUAL_SHA"
+            exit 1
+          fi
+          echo "✔ SHA-256 digest verified successfully: ${ACTUAL_SHA}"
+        fi
+
+        echo "📦 Extracting ${ARCHIVE_NAME} into ${BIN_DIR}..."
+        if [ "$ARCHIVE_EXT" = "zip" ]; then
+          unzip -q -o "$TMP_DIR/$ARCHIVE_NAME" -d "$BIN_DIR"
+          EXE_PATH="$BIN_DIR/ocagents.exe"
+        else
+          tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$BIN_DIR"
+          EXE_PATH="$BIN_DIR/ocagents"
+          chmod +x "$EXE_PATH"
+          ln -sf "$EXE_PATH" "$BIN_DIR/oca"
+        fi
+
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "executable=${EXE_PATH}" >> "$GITHUB_OUTPUT"
+        echo "Successfully installed ocagents v${VERSION} to ${EXE_PATH}"
 
     - name: Verify CLI Installation
       shell: bash
       run: |
         ocagents info
+        oca version
