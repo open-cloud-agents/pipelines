@@ -1,0 +1,139 @@
+name: "Deterministic Pre-Flight Gatekeeper"
+description: "Executes Stage 1 Deterministic Pre-Flight Gate (ocagents preflight) with fail-closed availability protocol, signed exceptions, and OPA invariants"
+author: "Ibrahim Jimoh"
+
+inputs:
+  diff-target:
+    description: "Base branch, commit ref, or patch file to evaluate (default: main)"
+    required: false
+    default: "main"
+  paths:
+    description: "Optional specific file paths, directories, or globs to evaluate"
+    required: false
+    default: ""
+  strict:
+    description: "Escalate advisory warnings and missing advisory tools to exit code 1"
+    required: false
+    default: "false"
+  signing-key:
+    description: "Secret key for authenticating signed .ocagents/exceptions.json records (or set OCAGENTS_SIGNATURE_KEY)"
+    required: false
+    default: ""
+  export-json:
+    description: "Path to write structured JSON execution report"
+    required: false
+    default: "preflight_report.json"
+  codeql-suite:
+    description: "CodeQL query suite or pack (default: python-security-and-quality.qls)"
+    required: false
+    default: ""
+
+outputs:
+  status:
+    description: "Preflight verdict status (e.g. CLEAN, INCOMPLETE_CHECK_FAILED, INCONCLUSIVE_PARTIAL_AUDIT)"
+    value: ${{ steps.preflight.outputs.status }}
+  exit-code:
+    description: "Preflight process exit code (0: clean, 1: required failure, 2: advisory warnings)"
+    value: ${{ steps.preflight.outputs.exit-code }}
+  verdict:
+    description: "Summary verdict: PASSED, ADVISORY, or FAILED"
+    value: ${{ steps.preflight.outputs.verdict }}
+  report-path:
+    description: "Path to the generated JSON report"
+    value: ${{ inputs.export-json }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure Prerequisites & Linters Installed
+      shell: bash
+      run: |
+        if ! command -v ruff >/dev/null 2>&1; then
+          echo "Installing ruff linter..."
+          python3 -m pip install --quiet ruff || true
+        fi
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
+            echo "Installing shellcheck via apt..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck || true
+          fi
+        fi
+
+    - name: Ensure ocagents CLI is Available
+      shell: bash
+      run: |
+        if command -v ocagents >/dev/null 2>&1; then
+          echo "ocagents CLI found on PATH."
+        elif [ -f "./bin/ocagents" ]; then
+          echo "Using local ./bin/ocagents."
+        else
+          echo "Installing Open Cloud Agents CLI..."
+          curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Execute Deterministic Pre-Flight Gate
+      id: preflight
+      shell: bash
+      env:
+        DIFF_TARGET: ${{ inputs.diff-target }}
+        TARGET_PATHS: ${{ inputs.paths }}
+        STRICT_FLAG: ${{ inputs.strict }}
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        EXPORT_JSON: ${{ inputs.export-json }}
+        CODEQL_SUITE: ${{ inputs.codeql-suite }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+
+        if command -v ocagents >/dev/null 2>&1; then
+          CLI_BIN="ocagents"
+        elif [ -f "./bin/ocagents" ]; then
+          CLI_BIN="./bin/ocagents"
+        else
+          CLI_BIN="ocagents"
+        fi
+
+        ARGS="preflight --json"
+        if [ -n "$DIFF_TARGET" ]; then
+          ARGS="$ARGS --diff $DIFF_TARGET"
+        fi
+        if [ "$STRICT_FLAG" = "true" ]; then
+          ARGS="$ARGS --strict"
+        fi
+        if [ -n "$SIGNING_KEY" ]; then
+          export OCAGENTS_SIGNATURE_KEY="$SIGNING_KEY"
+        fi
+        if [ -n "$CODEQL_SUITE" ]; then
+          ARGS="$ARGS --codeql-suite $CODEQL_SUITE"
+        fi
+        if [ -n "$TARGET_PATHS" ]; then
+          ARGS="$ARGS $TARGET_PATHS"
+        fi
+
+        echo "Executing $CLI_BIN $ARGS..."
+        set +e
+        $CLI_BIN $ARGS > "$EXPORT_JSON"
+        EXIT_CODE=$?
+        set -e
+
+        echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        cat "$EXPORT_JSON"
+
+        STATUS=$(python3 -c "import json; d=json.load(open('$EXPORT_JSON')); print(d.get('status', 'UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          echo "verdict=PASSED" >> "$GITHUB_OUTPUT"
+          echo "✅ Deterministic pre-flight gate PASSED cleanly (exit 0)."
+        elif [ "$EXIT_CODE" -eq 2 ]; then
+          echo "verdict=ADVISORY" >> "$GITHUB_OUTPUT"
+          echo "⚠️ Deterministic pre-flight gate completed with ADVISORY warnings or missing advisory scanners (exit 2)."
+          if [ "$STRICT_FLAG" = "true" ]; then
+            echo "::error::Pre-flight advisory warnings escalated to failure in strict mode!"
+            exit 1
+          fi
+        else
+          echo "verdict=FAILED" >> "$GITHUB_OUTPUT"
+          echo "::error::Deterministic pre-flight gate FAILED required checks (exit $EXIT_CODE, status: $STATUS)!"
+          exit "$EXIT_CODE"
+        fi

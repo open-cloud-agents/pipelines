@@ -139,6 +139,9 @@ Every commit and pull request is automatically validated against:
 | **Reusable Workflow** | [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | Focused IaC & Terraform auditor for database wipes and perimeter leaks. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@v1` |
 | **Reusable Workflow** | [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | ISO/IEC 42001 dataset provenance and OWASP LLM prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@v1` |
 | **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1` |
+| **Modular Action** | [`findings-validate`](actions/findings-validate/action.yml) | Validates findings against `schemas/v1/finding.json` and checks diff/repo anchors. | `uses: open-cloud-agents/pipelines/actions/findings-validate@v1` |
+| **Modular Action** | [`deterministic-preflight`](actions/deterministic-preflight/action.yml) | Stage 1 pre-flight runner (`ocagents preflight --diff`) with fail-closed availability protocol. | `uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v1` |
+| **Modular Action** | [`kind-sandbox`](actions/kind-sandbox/action.yml) | Ephemeral KinD sandbox dry-runs and cluster tests. | `uses: open-cloud-agents/pipelines/actions/kind-sandbox@v1` |
 
 ---
 

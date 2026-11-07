@@ -1,0 +1,94 @@
+name: "Finding Schema Validator"
+description: "Validates machine-readable finding contracts against schemas/v1/finding.json with diff and repo provenance corroboration"
+author: "Ibrahim Jimoh"
+
+inputs:
+  path:
+    description: "Path to a finding JSON file or directory containing findings"
+    required: false
+    default: "findings.json"
+  diff:
+    description: "Optional diff target or saved unified git diff file for locator corroboration"
+    required: false
+    default: ""
+  repo-root:
+    description: "Repository root directory for relative path resolution"
+    required: false
+    default: "."
+  strict:
+    description: "Treat warnings as validation failures"
+    required: false
+    default: "false"
+
+outputs:
+  valid:
+    description: "Validation outcome ('true' or 'false')"
+    value: ${{ steps.validate.outputs.valid }}
+  findings-count:
+    description: "Total number of findings validated"
+    value: ${{ steps.validate.outputs.findings-count }}
+  errors-count:
+    description: "Total number of validation errors encountered"
+    value: ${{ steps.validate.outputs.errors-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure ocagents CLI is Available
+      shell: bash
+      run: |
+        if command -v ocagents >/dev/null 2>&1; then
+          echo "ocagents CLI found on PATH."
+        elif [ -f "./bin/ocagents" ]; then
+          echo "Using local ./bin/ocagents launcher."
+        else
+          echo "ocagents CLI not detected on PATH. Installing Open Cloud Agents CLI..."
+          curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Validate Finding Schema & Provenance
+      id: validate
+      shell: bash
+      env:
+        FINDINGS_PATH: ${{ inputs.path }}
+        DIFF_TARGET: ${{ inputs.diff }}
+        REPO_ROOT: ${{ inputs.repo-root }}
+        STRICT_MODE: ${{ inputs.strict }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+
+        if command -v ocagents >/dev/null 2>&1; then
+          CLI_BIN="ocagents"
+        elif [ -f "./bin/ocagents" ]; then
+          CLI_BIN="./bin/ocagents"
+        else
+          CLI_BIN="ocagents"
+        fi
+
+        ARGS="findings validate $FINDINGS_PATH --repo-root $REPO_ROOT"
+        if [ -n "$DIFF_TARGET" ]; then
+          ARGS="$ARGS --diff $DIFF_TARGET"
+        fi
+
+        echo "Validating findings via: $CLI_BIN $ARGS..."
+        set +e
+        OUTPUT=$($CLI_BIN $ARGS 2>&1)
+        EXIT_CODE=$?
+        set -e
+
+        echo "$OUTPUT"
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          echo "valid=true" >> "$GITHUB_OUTPUT"
+          echo "errors-count=0" >> "$GITHUB_OUTPUT"
+          echo "findings-count=1" >> "$GITHUB_OUTPUT"
+        else
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+          echo "errors-count=1" >> "$GITHUB_OUTPUT"
+          echo "findings-count=0" >> "$GITHUB_OUTPUT"
+          if [ "$STRICT_MODE" = "true" ] || [ "$EXIT_CODE" -eq 1 ]; then
+            echo "::error::Finding schema validation failed!"
+            exit "$EXIT_CODE"
+          fi
+        fi
