@@ -1,0 +1,213 @@
+name: "Risk Tiering Changeset Classifier"
+description: "Classifies git changesets into Tier 0 (Docs/Assets), Tier 1 (App Code), or Tier 2 (IaC/K8s/IAM) with token elimination"
+author: "Ibrahim Jimoh"
+
+inputs:
+  diff:
+    description: "Path to a unified git diff file or target git ref to compare (default: main)"
+    required: false
+    default: "main"
+  base:
+    description: "Base ref for git diff comparison"
+    required: false
+    default: "main"
+  head:
+    description: "Head ref for git diff comparison"
+    required: false
+    default: "HEAD"
+  repo-root:
+    description: "Custom repository root path"
+    required: false
+    default: "."
+  export-json:
+    description: "Path to export structured triage classification JSON report"
+    required: false
+    default: "risk_triage.json"
+  ocagents-version:
+    description: "Pinned version of ocagents CLI to install if not present on PATH"
+    required: false
+    default: "2.0.0"
+
+outputs:
+  risk-tier:
+    description: "Integer risk tier: 0 (Docs/Assets), 1 (App Logic), or 2 (Infrastructure)"
+    value: ${{ steps.classify.outputs.risk-tier }}
+  tier-name:
+    description: "Human-readable risk tier name"
+    value: ${{ steps.classify.outputs.tier-name }}
+  bypass-llm:
+    description: "Whether Stage 2 triage completely bypasses LLM agents ('true' or 'false')"
+    value: ${{ steps.classify.outputs.bypass-llm }}
+  target-agent:
+    description: "Primary recommended agent persona: none (Tier 0), devsecops-reviewer (Tier 1), blackboard (Tier 2)"
+    value: ${{ steps.classify.outputs.target-agent }}
+  report-path:
+    description: "Path to the generated JSON classification report"
+    value: ${{ steps.classify.outputs.report-path }}
+  diff-summary:
+    description: "JSON string summarizing file counts per risk tier"
+    value: ${{ steps.classify.outputs.diff-summary }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure ocagents CLI is Available
+      shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.ocagents-version }}
+      run: |
+        if command -v ocagents >/dev/null 2>&1; then
+          echo "✔ ocagents CLI found on PATH ($(command -v ocagents))."
+        elif [ -f "./bin/ocagents" ]; then
+          echo "✔ Using local ./bin/ocagents repository launcher."
+        else
+          echo "📥 Installing Open Cloud Agents CLI v${REQUESTED_VERSION}..."
+          VERSION="${REQUESTED_VERSION#v}"
+          BIN_DIR="$HOME/.local/bin"
+          mkdir -p "$BIN_DIR"
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "$OS" in
+            darwin)
+              case "$ARCH" in
+                arm64|aarch64) PLATFORM="darwin-arm64" ;;
+                x86_64) PLATFORM="darwin-amd64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            linux)
+              case "$ARCH" in
+                x86_64) PLATFORM="linux-amd64" ;;
+                arm64|aarch64) PLATFORM="linux-arm64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            *) echo "::error::Unsupported OS: $OS"; exit 1 ;;
+          esac
+          DOWNLOAD_URL="https://github.com/open-cloud-agents/ocagents/releases/download/v${VERSION}/ocagents-${PLATFORM}.tar.gz"
+          TMP_DIR=$(mktemp -d)
+          if curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/ocagents.tar.gz"; then
+            tar -xzf "$TMP_DIR/ocagents.tar.gz" -C "$BIN_DIR"
+            chmod +x "$BIN_DIR/ocagents"
+            ln -sf "$BIN_DIR/ocagents" "$BIN_DIR/oca"
+          else
+            curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
+          fi
+          rm -rf "$TMP_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+        fi
+
+    - name: Classify Changeset Risk Tier
+      id: classify
+      shell: bash
+      env:
+        DIFF_TARGET: ${{ inputs.diff }}
+        BASE_REF: ${{ inputs.base }}
+        HEAD_REF: ${{ inputs.head }}
+        REPO_ROOT: ${{ inputs.repo-root }}
+        EXPORT_JSON: ${{ inputs.export-json }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+
+        if command -v ocagents >/dev/null 2>&1; then
+          CLI_BIN="ocagents"
+        elif [ -f "./bin/ocagents" ]; then
+          CLI_BIN="./bin/ocagents"
+        else
+          CLI_BIN="ocagents"
+        fi
+
+        declare -a cmd=("$CLI_BIN" "triage" "classify" "--repo-root" "$REPO_ROOT" "--json")
+        if [ -f "$DIFF_TARGET" ]; then
+          cmd+=("--diff" "$DIFF_TARGET")
+        else
+          cmd+=("--base" "$BASE_REF" "--head" "$HEAD_REF")
+        fi
+
+        echo "🔍 Executing changeset risk tier classification..."
+        set +e
+        JSON_OUTPUT=$("${cmd[@]}")
+        EXIT_CODE=$?
+        set -e
+
+        if [ "$EXIT_CODE" -ne 0 ] || [ -z "$JSON_OUTPUT" ]; then
+          echo "::error::Failed to classify changeset risk tier!"
+          echo "$JSON_OUTPUT"
+          exit "$EXIT_CODE"
+        fi
+
+        echo "$JSON_OUTPUT" > "$EXPORT_JSON"
+
+        RISK_TIER=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('risk_tier', 2))")
+        TIER_NAME=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('tier_name', 'Tier 2'))")
+        SUMMARY=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(json.dumps(data.get('diff_summary', {})))")
+
+        if [ "$RISK_TIER" -eq 0 ]; then
+          BYPASS_LLM="true"
+          TARGET_AGENT="none"
+        elif [ "$RISK_TIER" -eq 1 ]; then
+          BYPASS_LLM="false"
+          TARGET_AGENT="devsecops-reviewer"
+        else
+          BYPASS_LLM="false"
+          TARGET_AGENT="blackboard"
+        fi
+
+        echo "risk-tier=$RISK_TIER" >> "$GITHUB_OUTPUT"
+        echo "tier-name=$TIER_NAME" >> "$GITHUB_OUTPUT"
+        echo "bypass-llm=$BYPASS_LLM" >> "$GITHUB_OUTPUT"
+        echo "target-agent=$TARGET_AGENT" >> "$GITHUB_OUTPUT"
+        echo "report-path=$EXPORT_JSON" >> "$GITHUB_OUTPUT"
+        echo "diff-summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+
+        echo "=================================================="
+        echo "🎯 Risk Classification: $TIER_NAME"
+        echo "   • Risk Tier:     $RISK_TIER"
+        echo "   • Bypass LLM:    $BYPASS_LLM"
+        echo "   • Target Agent:  $TARGET_AGENT"
+        echo "   • Report Path:   $EXPORT_JSON"
+        echo "=================================================="
+
+    - name: Generate Risk Tiering Step Summary
+      if: always()
+      shell: bash
+      env:
+        EXPORT_JSON: ${{ inputs.export-json }}
+      run: |
+        if [ -n "$GITHUB_STEP_SUMMARY" ] && [ -f "$EXPORT_JSON" ]; then
+          python3 -c "
+          import json, os
+          with open('$EXPORT_JSON') as fh:
+              data = json.load(fh)
+          tier = data.get('risk_tier', 2)
+          tier_name = data.get('tier_name', 'Unknown')
+          reasons = data.get('reasons', [])
+          summary = data.get('diff_summary', {})
+          agents = data.get('activated_agents', [])
+
+          icon = '🟢' if tier == 0 else ('🟡' if tier == 1 else '🔴')
+
+          lines = [
+              f'### {icon} Open Cloud Agents: Changeset Risk Tiering',
+              '',
+              '| Metric | Evaluation |',
+              '|---|---|',
+              f'| **Classified Risk Tier** | **{tier_name}** (Tier {tier}) |',
+              f'| **Total Modified Files** | \`{summary.get(\"total_files\", 0)}\` |',
+              f'| **Tier 0 Files (Docs/Assets)** | \`{summary.get(\"tier_0\", 0)}\` |',
+              f'| **Tier 1 Files (App Code)** | \`{summary.get(\"tier_1\", 0)}\` |',
+              f'| **Tier 2 Files (IaC/K8s/IAM)** | \`{summary.get(\"tier_2\", 0)}\` |',
+              f'| **Activated Personas** | \`{\", \".join(agents) if agents else \"None (LLM Bypassed)\"}\` |',
+              '',
+              '#### Classification Rationale',
+          ]
+          for r in reasons:
+              lines.append(f'- {r}')
+          lines.append('')
+          lines.append('> *Enforced autonomously by [Open Cloud Agents Risk Classifier](https://github.com/open-cloud-agents/pipelines).*')
+          lines.append('')
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('\n'.join(lines) + '\n')
+          "
+        fi

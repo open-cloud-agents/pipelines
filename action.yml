@@ -125,15 +125,15 @@ runs:
       run: |
         if [ -n "$GITHUB_STEP_SUMMARY" ]; then
           cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
-### 🛡️ Open Cloud Agents: Guardrail Execution Summary
+          ### 🛡️ Open Cloud Agents: Guardrail Execution Summary
 
-| Audit Gate | Scope | Configuration |
-|---|---|---|
-| **IaC State Destruction & Perimeter** | Terraform / OpenTofu / CloudFormation | ${{ inputs.enable-iac-audit == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
-| **AI Lineage & Prompt Safety** | Python ISO 42001 & OWASP Top 10 | ${{ inputs.enable-ai-safety == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
-| **Zero-Trust Secret Detection** | Gitleaks scan on workspace | ${{ inputs.enable-secret-scan == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
-| **Shell Script Hygiene** | ShellCheck on *.sh scripts | ${{ inputs.enable-shell-lint == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
+          | Audit Gate | Scope | Configuration |
+          |---|---|---|
+          | **IaC State Destruction & Perimeter** | Terraform / OpenTofu / CloudFormation | ${{ inputs.enable-iac-audit == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
+          | **AI Lineage & Prompt Safety** | Python ISO 42001 & OWASP Top 10 | ${{ inputs.enable-ai-safety == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
+          | **Zero-Trust Secret Detection** | Gitleaks scan on workspace | ${{ inputs.enable-secret-scan == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
+          | **Shell Script Hygiene** | ShellCheck on *.sh scripts | ${{ inputs.enable-shell-lint == 'true' && '✅ Enabled' || '⏸️ Skipped' }} |
 
-> *Enforced autonomously by [Open Cloud Agents Pipelines](https://github.com/open-cloud-agents/pipelines).*
-EOF
+          > *Enforced autonomously by [Open Cloud Agents Pipelines](https://github.com/open-cloud-agents/pipelines).*
+          EOF
         fi

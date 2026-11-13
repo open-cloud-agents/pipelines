@@ -1,0 +1,300 @@
+name: "Findings Triage Gatekeeper"
+description: "Evaluates blackboard & model findings, blocks CI on unverified P0/P1 assertions, and manages open-cloud-agents/triage-gate status check"
+author: "Ibrahim Jimoh"
+
+inputs:
+  findings:
+    description: "Path to finding JSON file or directory containing findings"
+    required: false
+    default: "findings.json"
+  db:
+    description: "Path to Blackboard SQLite database"
+    required: false
+    default: ".ocagents/blackboard.db"
+  run-id:
+    description: "Filter findings by specific blackboard run_id"
+    required: false
+    default: ""
+  sha:
+    description: "Commit SHA for commit status check (default: github.event.pull_request.head.sha or github.sha)"
+    required: false
+    default: ""
+  repo:
+    description: "Target repository owner/name (default: github.repository)"
+    required: false
+    default: ""
+  pr:
+    description: "Target pull request number for label and reviewer assignments"
+    required: false
+    default: ""
+  codeowners:
+    description: "Path to CODEOWNERS file for routing security review"
+    required: false
+    default: ".github/CODEOWNERS"
+  github-token:
+    description: "GitHub Token with repo status & PR write permissions"
+    required: false
+    default: ""
+  fail-on-blocking:
+    description: "Fail the workflow step with exit code 1 if unresolved P0/P1 findings exist"
+    required: false
+    default: "false"
+  export-json:
+    description: "Path to export structured triage gate JSON report"
+    required: false
+    default: "triage_gate_report.json"
+  ocagents-version:
+    description: "Pinned version of ocagents CLI to install if not present on PATH"
+    required: false
+    default: "2.0.0"
+
+outputs:
+  status:
+    description: "Commit status state: 'success', 'pending', or 'failure'"
+    value: ${{ steps.gate.outputs.status }}
+  verdict:
+    description: "Summary verdict: 'PASSED', 'PENDING_REVIEW', or 'BLOCKED'"
+    value: ${{ steps.gate.outputs.verdict }}
+  total-findings:
+    description: "Total findings evaluated across all severities"
+    value: ${{ steps.gate.outputs.total-findings }}
+  unresolved-p0-p1-count:
+    description: "Number of unresolved P0 and P1 model assertions holding the gate"
+    value: ${{ steps.gate.outputs.unresolved-p0-p1-count }}
+  p0-count:
+    description: "Number of P0 critical findings"
+    value: ${{ steps.gate.outputs.p0-count }}
+  p1-count:
+    description: "Number of P1 high findings"
+    value: ${{ steps.gate.outputs.p1-count }}
+  p2-count:
+    description: "Number of P2 medium findings"
+    value: ${{ steps.gate.outputs.p2-count }}
+  p3-count:
+    description: "Number of P3 low findings"
+    value: ${{ steps.gate.outputs.p3-count }}
+  report-path:
+    description: "Path to the generated JSON report"
+    value: ${{ steps.gate.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure ocagents CLI is Available
+      shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.ocagents-version }}
+      run: |
+        if command -v ocagents >/dev/null 2>&1; then
+          echo "✔ ocagents CLI found on PATH ($(command -v ocagents))."
+        elif [ -f "./bin/ocagents" ]; then
+          echo "✔ Using local ./bin/ocagents repository launcher."
+        else
+          echo "📥 Installing Open Cloud Agents CLI v${REQUESTED_VERSION}..."
+          VERSION="${REQUESTED_VERSION#v}"
+          BIN_DIR="$HOME/.local/bin"
+          mkdir -p "$BIN_DIR"
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "$OS" in
+            darwin)
+              case "$ARCH" in
+                arm64|aarch64) PLATFORM="darwin-arm64" ;;
+                x86_64) PLATFORM="darwin-amd64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            linux)
+              case "$ARCH" in
+                x86_64) PLATFORM="linux-amd64" ;;
+                arm64|aarch64) PLATFORM="linux-arm64" ;;
+                *) echo "::error::Unsupported architecture: $ARCH for $OS"; exit 1 ;;
+              esac
+              ;;
+            *) echo "::error::Unsupported OS: $OS"; exit 1 ;;
+          esac
+          DOWNLOAD_URL="https://github.com/open-cloud-agents/ocagents/releases/download/v${VERSION}/ocagents-${PLATFORM}.tar.gz"
+          TMP_DIR=$(mktemp -d)
+          if curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/ocagents.tar.gz"; then
+            tar -xzf "$TMP_DIR/ocagents.tar.gz" -C "$BIN_DIR"
+            chmod +x "$BIN_DIR/ocagents"
+            ln -sf "$BIN_DIR/ocagents" "$BIN_DIR/oca"
+          else
+            curl -fsSL https://open-cloud-agents.github.io/ocagents/install.sh | bash
+          fi
+          rm -rf "$TMP_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+        fi
+
+    - name: Evaluate Findings Triage Gate
+      id: gate
+      shell: bash
+      env:
+        FINDINGS_PATH: ${{ inputs.findings }}
+        DB_PATH: ${{ inputs.db }}
+        RUN_ID: ${{ inputs.run-id }}
+        TARGET_SHA: ${{ inputs.sha }}
+        TARGET_REPO: ${{ inputs.repo }}
+        TARGET_PR: ${{ inputs.pr }}
+        CODEOWNERS_PATH: ${{ inputs.codeowners }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        FAIL_ON_BLOCKING: ${{ inputs.fail-on-blocking }}
+        EXPORT_JSON: ${{ inputs.export-json }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+
+        if command -v ocagents >/dev/null 2>&1; then
+          CLI_BIN="ocagents"
+        elif [ -f "./bin/ocagents" ]; then
+          CLI_BIN="./bin/ocagents"
+        else
+          CLI_BIN="ocagents"
+        fi
+
+        RESOLVED_SHA="${TARGET_SHA:-${GITHUB_SHA:-}}"
+        RESOLVED_REPO="${TARGET_REPO:-${GITHUB_REPOSITORY:-}}"
+
+        declare -a cmd=("$CLI_BIN" "triage" "--gate" "--json")
+
+        if [ -f "$FINDINGS_PATH" ] || [ -d "$FINDINGS_PATH" ]; then
+          cmd+=("--findings" "$FINDINGS_PATH")
+        fi
+        if [ -f "$DB_PATH" ]; then
+          cmd+=("--db" "$DB_PATH")
+        fi
+        if [ -n "$RUN_ID" ]; then
+          cmd+=("--run-id" "$RUN_ID")
+        fi
+        if [ -n "$RESOLVED_SHA" ]; then
+          cmd+=("--sha" "$RESOLVED_SHA")
+        fi
+        if [ -n "$RESOLVED_REPO" ]; then
+          cmd+=("--repo" "$RESOLVED_REPO")
+        fi
+        if [ -n "$TARGET_PR" ]; then
+          cmd+=("--pr" "$TARGET_PR")
+        fi
+        if [ -f "$CODEOWNERS_PATH" ]; then
+          cmd+=("--codeowners" "$CODEOWNERS_PATH")
+        fi
+
+        echo "🛡️ Evaluating open-cloud-agents/triage-gate status check..."
+        set +e
+        JSON_OUTPUT=$("${cmd[@]}")
+        EXIT_CODE=$?
+        set -e
+
+        if [ "$EXIT_CODE" -ne 0 ] || [ -z "$JSON_OUTPUT" ]; then
+          echo "::error::Triage gate command execution failed!"
+          echo "$JSON_OUTPUT"
+          exit "$EXIT_CODE"
+        fi
+
+        echo "$JSON_OUTPUT" > "$EXPORT_JSON"
+
+        GATE_STATUS=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('status', 'unknown'))")
+        TOTAL_FINDINGS=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('total_findings', 0))")
+        UNRESOLVED_COUNT=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('unresolved_p0_p1_count', 0))")
+        P0_COUNT=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('p0_count', 0))")
+        P1_COUNT=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('p1_count', 0))")
+        P2_COUNT=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('p2_count', 0))")
+        P3_COUNT=$(python3 -c "import json; data=json.load(open('$EXPORT_JSON')); print(data.get('p3_count', 0))")
+
+        if [ "$GATE_STATUS" = "success" ]; then
+          VERDICT="PASSED"
+        elif [ "$GATE_STATUS" = "pending" ]; then
+          VERDICT="PENDING_REVIEW"
+        else
+          VERDICT="BLOCKED"
+        fi
+
+        echo "status=$GATE_STATUS" >> "$GITHUB_OUTPUT"
+        echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+        echo "total-findings=$TOTAL_FINDINGS" >> "$GITHUB_OUTPUT"
+        echo "unresolved-p0-p1-count=$UNRESOLVED_COUNT" >> "$GITHUB_OUTPUT"
+        echo "p0-count=$P0_COUNT" >> "$GITHUB_OUTPUT"
+        echo "p1-count=$P1_COUNT" >> "$GITHUB_OUTPUT"
+        echo "p2-count=$P2_COUNT" >> "$GITHUB_OUTPUT"
+        echo "p3-count=$P3_COUNT" >> "$GITHUB_OUTPUT"
+        echo "report-path=$EXPORT_JSON" >> "$GITHUB_OUTPUT"
+
+        echo "=================================================="
+        echo "🏁 Triage Gate Result: $VERDICT"
+        echo "   • Status Check:           open-cloud-agents/triage-gate -> $GATE_STATUS"
+        echo "   • Total Findings:         $TOTAL_FINDINGS"
+        echo "   • Unresolved P0/P1:       $UNRESOLVED_COUNT"
+        echo "   • Breakdown:              P0: $P0_COUNT | P1: $P1_COUNT | P2: $P2_COUNT | P3: $P3_COUNT"
+        echo "=================================================="
+
+        if [ "$FAIL_ON_BLOCKING" = "true" ] && [ "$UNRESOLVED_COUNT" -gt 0 ]; then
+          echo "::error::Triage gate failed: $UNRESOLVED_COUNT unresolved P0/P1 findings are blocking merge!"
+          exit 1
+        fi
+
+    - name: Generate Triage Gate Step Summary
+      if: always()
+      shell: bash
+      env:
+        EXPORT_JSON: ${{ inputs.export-json }}
+      run: |
+        if [ -n "$GITHUB_STEP_SUMMARY" ] && [ -f "$EXPORT_JSON" ]; then
+          python3 -c "
+          import json, os
+          with open('$EXPORT_JSON') as fh:
+              data = json.load(fh)
+
+          status = data.get('status', 'unknown')
+          total = data.get('total_findings', 0)
+          unresolved = data.get('unresolved_p0_p1_count', 0)
+          p0 = data.get('p0_count', 0)
+          p1 = data.get('p1_count', 0)
+          p2 = data.get('p2_count', 0)
+          p3 = data.get('p3_count', 0)
+          desc = data.get('description', '')
+          codeowners = data.get('codeowners', [])
+          unresolved_items = data.get('unresolved_findings', [])
+
+          if status == 'success':
+              badge = '✅ **PASSED**'
+          elif status == 'pending':
+              badge = '⏳ **PENDING SECURITY REVIEW**'
+          else:
+              badge = '❌ **BLOCKED**'
+
+          lines = [
+              '### 🛡️ Open Cloud Agents: Triage Gatekeeper',
+              '',
+              '| Metric | Status |',
+              '|---|---|',
+              '| **Status Check** | \`open-cloud-agents/triage-gate\` |',
+              f'| **Gate Result** | {badge} |',
+              f'| **Description** | {desc} |',
+              f'| **Total Findings** | \`{total}\` |',
+              f'| **Unresolved P0/P1 Blocking** | \`{unresolved}\` |',
+              f'| **Severity Distribution** | P0: \`{p0}\` \| P1: \`{p1}\` \| P2: \`{p2}\` \| P3: \`{p3}\` |',
+              f'| **Designated CODEOWNERS** | \`{\", \".join(codeowners) if codeowners else \"Repository Default\"}\` |',
+              '',
+          ]
+
+          if unresolved_items:
+              lines.append('#### ⚠️ Unresolved P0 / P1 Assertions Holding Gate')
+              lines.append('')
+              lines.append('| Finding ID | Severity | File | Message |')
+              lines.append('|---|---|---|---|')
+              for it in unresolved_items:
+                  f_id = it.get('finding_id', 'UNKNOWN')
+                  sev = it.get('severity', 'P1')
+                  f_path = it.get('file_path', 'unknown')
+                  msg = it.get('title', it.get('message', ''))
+                  lines.append(f'| \`{f_id}\` | **{sev}** | \`{f_path}\` | {msg} |')
+              lines.append('')
+              lines.append('> **How to resolve:** Use \`/ocagents triage <finding-id> accept|dismiss\` in a PR comment or run \`ocagents triage resolve\`.')
+              lines.append('')
+
+          lines.append('> *Enforced autonomously by [Open Cloud Agents Triage Gatekeeper](https://github.com/open-cloud-agents/pipelines).*')
+          lines.append('')
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('\n'.join(lines) + '\n')
+          "
+        fi

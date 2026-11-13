@@ -1,7 +1,7 @@
 # 🌐 Open Cloud Agents: Pipelines
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-open--cloud--agents%2Fpipelines%40v1-blue.svg?logo=githubactions&logoColor=white)](action.yml)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-open--cloud--agents%2Fpipelines%40v2-blue.svg?logo=githubactions&logoColor=white)](action.yml)
 [![Reusable Workflows](https://img.shields.io/badge/Reusable%20Workflows-.github%2Fworkflows-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/)
 [![Well-Architected](https://img.shields.io/badge/Guardrails-AWS%20%7C%20Azure%20%7C%20GCP-orange.svg)](https://github.com/open-cloud-agents/ocagents)
 
@@ -162,14 +162,16 @@ Every commit and pull request is automatically validated against:
 
 | Type | Target | Purpose | Invocation |
 |---|---|---|---|
-| **Root Composite Action** | [`action.yml`](action.yml) | Runs full audit suite as a single step inside any existing runner job. | `uses: open-cloud-agents/pipelines@v1` |
-| **Reusable Workflow** | [`cloud-guardrails.yml`](.github/workflows/cloud-guardrails.yml) | Complete standalone 4-stage audit workflow across multiple jobs. | `uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v1` |
-| **Reusable Workflow** | [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | Focused IaC & Terraform auditor for database wipes and perimeter leaks. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@v1` |
-| **Reusable Workflow** | [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | ISO/IEC 42001 dataset provenance and OWASP LLM prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@v1` |
-| **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs and cryptographically verifies `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1` |
-| **Modular Action** | [`findings-validate`](actions/findings-validate/action.yml) | Validates findings against `schemas/v1/finding.json` and checks diff/repo anchors. | `uses: open-cloud-agents/pipelines/actions/findings-validate@v1` |
-| **Modular Action** | [`deterministic-preflight`](actions/deterministic-preflight/action.yml) | Stage 1 pre-flight runner (`ocagents preflight --diff`) with fail-closed availability protocol and pinned scanners. | `uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v1` |
-| **Modular Action** | [`kind-sandbox`](actions/kind-sandbox/action.yml) | Ephemeral KinD sandbox dry-runs and cluster tests. | `uses: open-cloud-agents/pipelines/actions/kind-sandbox@v1` |
+| **Root Composite Action** | [`action.yml`](action.yml) | Runs full audit suite as a single step inside any existing runner job. | `uses: open-cloud-agents/pipelines@v2` |
+| **Reusable Workflow** | [`cloud-guardrails.yml`](.github/workflows/cloud-guardrails.yml) | Complete standalone 4-stage audit workflow across multiple jobs. | `uses: open-cloud-agents/pipelines/.github/workflows/cloud-guardrails.yml@v2` |
+| **Reusable Workflow** | [`iac-security-audit.yml`](.github/workflows/iac-security-audit.yml) | Focused IaC & Terraform auditor for database wipes and perimeter leaks. | `uses: open-cloud-agents/pipelines/.github/workflows/iac-security-audit.yml@v2` |
+| **Reusable Workflow** | [`ai-safety-governance.yml`](.github/workflows/ai-safety-governance.yml) | ISO/IEC 42001 dataset provenance and OWASP LLM prompt defenses. | `uses: open-cloud-agents/pipelines/.github/workflows/ai-safety-governance.yml@v2` |
+| **Modular Action** | [`setup-ocagents`](actions/setup-ocagents/action.yml) | Installs and cryptographically verifies `ocagents` standalone CLI on the runner. | `uses: open-cloud-agents/pipelines/actions/setup-ocagents@v2` |
+| **Modular Action** | [`risk-tier`](actions/risk-tier/action.yml) | Stage 2 Changeset Risk Tiering (Tier 0 docs/assets bypass, Tier 1 app code, Tier 2 infra). | `uses: open-cloud-agents/pipelines/actions/risk-tier@v2` |
+| **Modular Action** | [`findings-validate`](actions/findings-validate/action.yml) | Validates findings against `schemas/v1/finding.json` and checks diff/repo anchors. | `uses: open-cloud-agents/pipelines/actions/findings-validate@v2` |
+| **Modular Action** | [`triage-gate`](actions/triage-gate/action.yml) | Stage 6 Findings Triage Gate (`open-cloud-agents/triage-gate` commit check holding on P0/P1). | `uses: open-cloud-agents/pipelines/actions/triage-gate@v2` |
+| **Modular Action** | [`deterministic-preflight`](actions/deterministic-preflight/action.yml) | Stage 1 pre-flight runner (`ocagents preflight --diff`) with fail-closed availability protocol and pinned scanners. | `uses: open-cloud-agents/pipelines/actions/deterministic-preflight@v2` |
+| **Modular Action** | [`kind-sandbox`](actions/kind-sandbox/action.yml) | Ephemeral KinD sandbox dry-runs and cluster tests. | `uses: open-cloud-agents/pipelines/actions/kind-sandbox@v2` |
 
 ---
 

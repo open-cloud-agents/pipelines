@@ -42,7 +42,7 @@ inputs:
   ocagents-version:
     description: "Pinned version of ocagents CLI to install if not present on PATH"
     required: false
-    default: "1.5.0"
+    default: "2.0.0"
   codeql-db-path:
     description: "Optional path to a pre-compiled CodeQL database for local SAST inspection (workflow-level analysis should use github/codeql-action)"
     required: false
