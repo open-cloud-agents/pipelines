@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate configuration for Open Cloud Agents reusable pipelines",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": ["every weekday"],
+  "assignees": ["Ibrahimng"],
+  "labels": ["dependencies", "automated"],
+  "commitMessagePrefix": "ci(deps):",
+  "packageRules": [
+    {
+      "description": "Group minor and patch GitHub Actions updates across workflows and composite actions",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions-minor-patch",
+      "matchUpdateTypes": ["minor", "patch"],
+      "commitMessagePrefix": "ci(deps):"
+    },
+    {
+      "description": "Separate PRs for GitHub Actions major upgrades",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "commitMessagePrefix": "ci(deps):",
+      "labels": ["dependencies", "major-bump"]
+    },
+    {
+      "description": "Immediate security and vulnerability updates",
+      "matchPackagePatterns": ["*"],
+      "matchCurrentVersion": "!/^0/",
+      "isVulnerability": true,
+      "schedule": ["at any time"],
+      "labels": ["security", "dependencies"],
+      "assignees": ["Ibrahimng"]
+    }
+  ]
+}
