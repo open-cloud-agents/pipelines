@@ -38,10 +38,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup ocagents CLI
-        uses: open-cloud-agents/pipelines/actions/setup-ocagents@v1
+        uses: open-cloud-agents/pipelines/actions/setup-ocagents@v2
 
       - name: Run KinD Sandbox Verification
-        uses: open-cloud-agents/pipelines/actions/kind-sandbox@v1
+        uses: open-cloud-agents/pipelines/actions/kind-sandbox@v2
         with:
           manifest-path: ${{ inputs.manifest-path }}
           helm-chart: ${{ inputs.helm-chart }}
